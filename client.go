@@ -3,6 +3,7 @@ package robonaut
 import (
 	"fmt"
 	"log"
+	"net/url"
 
 	"github.com/RocketChat/Rocket.Chat.Go.SDK/models"
 	"github.com/RocketChat/Rocket.Chat.Go.SDK/realtime"
@@ -13,13 +14,16 @@ var defaultDomain = "test.com"
 
 // Robonaut main bot object
 type Robonaut struct {
-	Name       string
-	hostInfo   HostInfo
-	Client     *realtime.Client
-	Self       *models.User
-	MsgChannel chan models.Message
-	stop       chan bool
-	data       RobonautDataStore
+	Name            string
+	URL             string
+	DebugMode       bool
+	Client          *realtime.Client
+	Self            *models.User
+	MsgChannel      chan models.Message
+	MessageListener func(models.Message)
+	stop            chan bool
+	action          chan RobonautAction
+	data            RobonautDataStore
 }
 
 type RobonautDataStore struct {
@@ -29,22 +33,28 @@ type RobonautDataStore struct {
 	ChannelSubscriptions []models.ChannelSubscription
 }
 
-type HostInfo struct {
-	Host  string
-	Port  string
-	Ssl   bool
-	Debug bool
+type RobonautAction interface {
+	Do(*Robonaut) error
+}
+
+type RobonautSpeak struct {
+	Type string
 }
 
 // SpawnRobonaut Creates a new instance of the bot
-func SpawnRobonaut(name string, hostInfo HostInfo) *Robonaut {
-	return &Robonaut{Name: name, hostInfo: hostInfo, data: RobonautDataStore{}}
+func SpawnRobonaut(name string, url string, debug bool) *Robonaut {
+	return &Robonaut{Name: name, URL: url, data: RobonautDataStore{}, DebugMode: debug}
 }
 
 // Start connects the ddp client
 func (r *Robonaut) Start() error {
 
-	c, err := realtime.NewClient(fmt.Sprintf("%s:%s", r.hostInfo.Host, r.hostInfo.Port), r.hostInfo.Ssl, r.hostInfo.Debug)
+	serverUrl, err := url.Parse(r.URL)
+	if err != nil {
+		return err
+	}
+
+	c, err := realtime.NewClient(serverUrl, r.DebugMode)
 	if err != nil {
 		log.Println("Failed to connect", err)
 		return err
@@ -53,14 +63,37 @@ func (r *Robonaut) Start() error {
 	r.Client = c
 
 	r.MsgChannel = make(chan models.Message, 100)
+	r.action = make(chan RobonautAction, 100)
 	r.stop = make(chan bool)
 
 	return nil
 }
 
-// Block blocks until a message on stop channel
-func (r *Robonaut) Block() {
-	<-r.stop
+func (r *Robonaut) Reconnect() {
+	r.Client.Reconnect()
+}
+
+// EventLoop blocks until a message on stop channel
+func (r *Robonaut) EventLoop() {
+	for {
+		select {
+		case message := <-r.MsgChannel:
+			log.Println(r.Name, message.Text)
+			if r.MessageListener != nil {
+				r.MessageListener(message)
+			}
+
+		case action := <-r.action:
+			log.Println("New action", action)
+			err := action.Do(r)
+			if err != nil {
+				log.Println(err)
+			}
+
+		case <-r.stop:
+			return
+		}
+	}
 }
 
 // Stop Closes out the ddp connection
@@ -97,6 +130,18 @@ func (r *Robonaut) Login() error {
 	r.Client.ConnectionOnline()
 
 	return err
+}
+
+func (r *Robonaut) LoginOrRegister() error {
+	if err := r.Login(); err != nil {
+		log.Println("Unable to login")
+		if err := r.Register(); err != nil {
+			log.Println(fmt.Sprintf("Failed to register %v.  \nError: %v", r.Name, err))
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *Robonaut) AddConnectionStatusListener(listener func(int)) {
@@ -190,11 +235,7 @@ func (r *Robonaut) ListenToCommsChannel(channel *models.Channel) error {
 
 // Speak sends a message to a channel
 func (r *Robonaut) Speak(channel *models.Channel, message string) error {
-	// TODO: Maybe look at this response
-	_, err := r.Client.SendMessage(channel, message)
-	if err != nil {
-		return err
-	}
+	r.action <- ActionSpeak{Channel: *channel, Message: message}
 
 	return nil
 }
