@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"time"
 
 	"github.com/RocketChat/Rocket.Chat.Go.SDK/models"
 	"github.com/RocketChat/Rocket.Chat.Go.SDK/realtime"
@@ -21,6 +22,7 @@ type Robonaut struct {
 	Self            *models.User
 	MsgChannel      chan models.Message
 	MessageListener func(models.Message)
+	MessageLastSent time.Time
 	stop            chan bool
 	action          chan RobonautAction
 	data            RobonautDataStore
@@ -75,23 +77,29 @@ func (r *Robonaut) Reconnect() {
 
 // EventLoop blocks until a message on stop channel
 func (r *Robonaut) EventLoop() {
+	go r.processActionQueue()
+	go r.processMessageQueue()
+
+	<-r.stop
+}
+
+func (r *Robonaut) processMessageQueue() {
 	for {
-		select {
-		case message := <-r.MsgChannel:
-			log.Println(r.Name, message.Text)
-			if r.MessageListener != nil {
-				r.MessageListener(message)
-			}
+		message := <-r.MsgChannel
+		log.Println(r.Name, message.Text)
+		if r.MessageListener != nil {
+			r.MessageListener(message)
+		}
+	}
+}
 
-		case action := <-r.action:
-			log.Println("New action", action)
-			err := action.Do(r)
-			if err != nil {
-				log.Println(err)
-			}
-
-		case <-r.stop:
-			return
+func (r *Robonaut) processActionQueue() {
+	for {
+		action := <-r.action
+		log.Println(r.Name, "Processing Action: ", action)
+		err := action.Do(r)
+		if err != nil {
+			log.Println(err)
 		}
 	}
 }
@@ -185,6 +193,10 @@ func (r *Robonaut) GetInitialData() error {
 	return nil
 }
 
+func (r *Robonaut) Subscribe(sub string, args string) {
+	r.Client.Sub(sub, args)
+}
+
 // EstablishSync subscribes to all connections needed
 func (r *Robonaut) EstablishSync() error {
 	// Subscribe to stuff
@@ -236,6 +248,15 @@ func (r *Robonaut) ListenToCommsChannel(channel *models.Channel) error {
 // Speak sends a message to a channel
 func (r *Robonaut) Speak(channel *models.Channel, message string) error {
 	r.action <- ActionSpeak{Channel: *channel, Message: message}
+	log.Println("Speak added to Action Queue")
+
+	return nil
+}
+
+// React reacts to a message
+func (r *Robonaut) React(message *models.Message, reaction string) error {
+	r.action <- ActionReact{Message: *message, Reaction: reaction}
+	log.Println("React added to Action Queue")
 
 	return nil
 }
