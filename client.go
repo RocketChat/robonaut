@@ -218,13 +218,13 @@ func (r *Robonaut) EstablishSync() error {
 	r.Client.Sub("stream-notify-logged", "updateEmojiCustom")
 	r.Client.Sub("stream-notify-logged", "deleteEmojiCustom")
 
-	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/message", r.Self.Id))
-	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/otr", r.Self.Id))
-	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/webrtc", r.Self.Id))
-	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/notification", r.Self.Id))
+	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/message", r.Self.ID))
+	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/otr", r.Self.ID))
+	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/webrtc", r.Self.ID))
+	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/notification", r.Self.ID))
 
-	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/rooms-changed", r.Self.Id))
-	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/subscriptions-changed", r.Self.Id))
+	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/rooms-changed", r.Self.ID))
+	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/subscriptions-changed", r.Self.ID))
 
 	// robo.Client.GetChannelRoles(roomId)
 	// robo.Client.LoadHistory(roomId)
