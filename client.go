@@ -8,6 +8,7 @@ import (
 
 	"github.com/RocketChat/Rocket.Chat.Go.SDK/models"
 	"github.com/RocketChat/Rocket.Chat.Go.SDK/realtime"
+	"github.com/RocketChat/Rocket.Chat.Go.SDK/rest"
 )
 
 var defaultPassword = "pass@word1"
@@ -19,9 +20,10 @@ type Robonaut struct {
 	URL             string
 	DebugMode       bool
 	Client          *realtime.Client
+	Rest            *rest.Client
 	Self            *models.User
 	MsgChannel      chan models.Message
-	MessageListener func(models.Message)
+	MessageListener func(models.Message) error
 	MessageLastSent time.Time
 	stop            chan bool
 	action          chan RobonautAction
@@ -64,6 +66,10 @@ func (r *Robonaut) Start() error {
 
 	r.Client = c
 
+	cR := rest.NewClient(serverUrl, r.DebugMode)
+
+	r.Rest = cR
+
 	r.MsgChannel = make(chan models.Message, 100)
 	r.action = make(chan RobonautAction, 100)
 	r.stop = make(chan bool)
@@ -86,9 +92,11 @@ func (r *Robonaut) EventLoop() {
 func (r *Robonaut) processMessageQueue() {
 	for {
 		message := <-r.MsgChannel
-		log.Println(r.Name, message.Text)
 		if r.MessageListener != nil {
-			r.MessageListener(message)
+			// TODO send errors to error handler
+			if err := r.MessageListener(message); err != nil {
+				log.Println("ERROR:", err)
+			}
 		}
 	}
 }
@@ -125,9 +133,9 @@ func (r *Robonaut) Register() error {
 }
 
 // Login logs into account
-func (r *Robonaut) Login() error {
+func (r *Robonaut) Login(email string, password string) error {
 	// Login an existing user
-	user, err := r.Client.Login(&models.UserCredentials{Email: fmt.Sprintf("%s@%s", r.Name, defaultDomain), Name: r.Name, Password: defaultPassword})
+	user, err := r.Client.Login(&models.UserCredentials{Email: email, Password: password})
 	if err != nil {
 		log.Println("Failed to login", err)
 		return err
@@ -137,11 +145,16 @@ func (r *Robonaut) Login() error {
 
 	r.Client.ConnectionOnline()
 
+	if err := r.Rest.Login(&models.UserCredentials{ID: user.ID, Token: user.Token}); err != nil {
+		log.Println("Failed to login rest", err)
+		return err
+	}
+
 	return err
 }
 
 func (r *Robonaut) LoginOrRegister() error {
-	if err := r.Login(); err != nil {
+	if err := r.Login(fmt.Sprintf("%s@%s", r.Name, defaultDomain), defaultPassword); err != nil {
 		log.Println("Unable to login")
 		if err := r.Register(); err != nil {
 			log.Println(fmt.Sprintf("Failed to register %v.  \nError: %v", r.Name, err))
@@ -197,30 +210,36 @@ func (r *Robonaut) Subscribe(sub string, args string) {
 	r.Client.Sub(sub, args)
 }
 
+func (r *Robonaut) ListenToMyMessages() error {
+	r.Client.SubscribeToMyMessages(r.MsgChannel)
+
+	return nil
+}
+
 // EstablishSync subscribes to all connections needed
 func (r *Robonaut) EstablishSync() error {
 	// Subscribe to stuff
-	r.Client.Sub("meteor.loginServiceConfiguration")
-	r.Client.Sub("meteor_autoupdate_clientVersions")
+	//	r.Client.Sub("meteor.loginServiceConfiguration")
+	//	r.Client.Sub("meteor_autoupdate_clientVersions")
 
-	r.Client.Sub("roles")
-	r.Client.Sub("userData")
-	r.Client.Sub("activeUsers")
+	//	r.Client.Sub("roles")
+	//	r.Client.Sub("userData")
+	//	r.Client.Sub("activeUsers")
 
-	r.Client.Sub("stream-notify-logged", "roles-changed")
-	r.Client.Sub("stream-notify-logged", "Users:NameChanged")
-	r.Client.Sub("stream-notify-logged", "updatedAvatar")
+	//	r.Client.Sub("stream-notify-logged", "roles-changed")
+	//	r.Client.Sub("stream-notify-logged", "Users:NameChanged")
+	//	r.Client.Sub("stream-notify-logged", "updatedAvatar")
 
-	r.Client.Sub("stream-notify-all", "public-settings-changed")
-	r.Client.Sub("stream-notify-all", "updateCustomSound")
-	r.Client.Sub("stream-notify-all", "deleteCustomSound")
+	//	r.Client.Sub("stream-notify-all", "public-settings-changed")
+	//	r.Client.Sub("stream-notify-all", "updateCustomSound")
+	//	r.Client.Sub("stream-notify-all", "deleteCustomSound")
 
-	r.Client.Sub("stream-notify-logged", "updateEmojiCustom")
-	r.Client.Sub("stream-notify-logged", "deleteEmojiCustom")
+	//	r.Client.Sub("stream-notify-logged", "updateEmojiCustom")
+	//	r.Client.Sub("stream-notify-logged", "deleteEmojiCustom")
 
 	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/message", r.Self.ID))
-	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/otr", r.Self.ID))
-	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/webrtc", r.Self.ID))
+	//	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/otr", r.Self.ID))
+	//	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/webrtc", r.Self.ID))
 	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/notification", r.Self.ID))
 
 	r.Client.Sub("stream-notify-user", fmt.Sprintf("%s/rooms-changed", r.Self.ID))
@@ -249,14 +268,6 @@ func (r *Robonaut) ListenToCommsChannel(channel *models.Channel) error {
 func (r *Robonaut) Speak(channel *models.Channel, message string) error {
 	r.action <- ActionSpeak{Channel: *channel, Message: message}
 	log.Println("Speak added to Action Queue")
-
-	return nil
-}
-
-// React reacts to a message
-func (r *Robonaut) React(message *models.Message, reaction string) error {
-	r.action <- ActionReact{Message: *message, Reaction: reaction}
-	log.Println("React added to Action Queue")
 
 	return nil
 }

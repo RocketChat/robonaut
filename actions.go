@@ -21,21 +21,7 @@ func (a ActionSpeak) Do(bot *Robonaut) error {
 		time.Sleep(a.Delay)
 	}
 
-	_, err := bot.Client.SendMessage(&a.Channel, a.Message)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-type ActionReact struct {
-	Message  models.Message
-	Reaction string
-}
-
-func (a ActionReact) Do(bot *Robonaut) error {
-	err := bot.Client.ReactToMessage(&a.Message, a.Reaction)
+	_, err := bot.Rest.PostMessage(&models.PostMessage{RoomID: a.Channel.ID, Text: a.Message})
 	if err != nil {
 		return err
 	}
